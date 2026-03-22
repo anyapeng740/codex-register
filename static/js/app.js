@@ -22,7 +22,8 @@ let availableServices = {
     tempmail: { available: true, services: [] },
     outlook: { available: false, services: [] },
     custom_domain: { available: false, services: [] },
-    temp_mail: { available: false, services: [] }
+    temp_mail: { available: false, services: [] },
+    generic_imap: { available: false, services: [] }
 };
 
 // WebSocket 相关变量
@@ -336,6 +337,23 @@ function updateEmailServiceOptions() {
 
         select.appendChild(optgroup);
     }
+
+    // Generic IMAP
+    if (availableServices.generic_imap && availableServices.generic_imap.available) {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = `📬 Generic IMAP (${availableServices.generic_imap.count} 个服务)`;
+
+        availableServices.generic_imap.services.forEach(service => {
+            const option = document.createElement('option');
+            option.value = `generic_imap:${service.id}`;
+            option.textContent = service.name + (service.domain ? ` (@${service.domain})` : '');
+            option.dataset.type = 'generic_imap';
+            option.dataset.serviceId = service.id;
+            optgroup.appendChild(option);
+        });
+
+        select.appendChild(optgroup);
+    }
 }
 
 // 处理邮箱服务切换
@@ -372,6 +390,11 @@ function handleServiceChange(e) {
         const service = availableServices.custom_domain.services.find(s => s.id == id);
         if (service) {
             addLog('info', `[系统] 已选择自定义域名服务: ${service.name}`);
+        }
+    } else if (type === 'generic_imap') {
+        const service = availableServices.generic_imap.services.find(s => s.id == id);
+        if (service) {
+            addLog('info', `[系统] 已选择 Generic IMAP 服务: ${service.name}`);
         }
     }
 }

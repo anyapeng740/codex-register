@@ -84,7 +84,28 @@ class OutlookBatchImportResponse(BaseModel):
 # ============== Helper Functions ==============
 
 # 敏感字段列表，返回响应时需要过滤
-SENSITIVE_FIELDS = {'password', 'api_key', 'refresh_token', 'access_token'}
+SENSITIVE_FIELDS = {'password', 'api_key', 'refresh_token', 'access_token', 'admin_password'}
+
+
+def _filter_sensitive_value(key: str, value: Any):
+    if isinstance(value, dict):
+        return {k: _filter_sensitive_value(k, v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_filter_sensitive_value(key, item) for item in value]
+    if key in SENSITIVE_FIELDS:
+        return bool(value)
+    return value
+
+
+def _merge_config(current: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(current or {})
+    for key, value in (incoming or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_config(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
 
 def filter_sensitive_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """过滤敏感配置信息"""
@@ -94,12 +115,15 @@ def filter_sensitive_config(config: Dict[str, Any]) -> Dict[str, Any]:
     filtered = {}
     for key, value in config.items():
         if key in SENSITIVE_FIELDS:
-            # 敏感字段不返回，但标记是否存在
             filtered[f"has_{key}"] = bool(value)
+        elif isinstance(value, dict):
+            filtered[key] = {
+                nested_key if nested_key not in SENSITIVE_FIELDS else f"has_{nested_key}": _filter_sensitive_value(nested_key, nested_value)
+                for nested_key, nested_value in value.items()
+            }
         else:
             filtered[key] = value
 
-    # 为 Outlook 计算是否有 OAuth
     if config.get('client_id') and config.get('refresh_token'):
         filtered['has_oauth'] = True
 
@@ -144,6 +168,7 @@ async def get_email_services_stats():
             'outlook_count': 0,
             'custom_count': 0,
             'temp_mail_count': 0,
+            'generic_imap_count': 0,
             'tempmail_available': True,  # 临时邮箱始终可用
             'enabled_count': enabled_count
         }
@@ -155,6 +180,8 @@ async def get_email_services_stats():
                 stats['custom_count'] = count
             elif service_type == 'temp_mail':
                 stats['temp_mail_count'] = count
+            elif service_type == 'generic_imap':
+                stats['generic_imap_count'] = count
 
         return stats
 
@@ -203,6 +230,21 @@ async def get_service_types():
                     {"name": "admin_password", "label": "Admin 密码", "required": True, "secret": True},
                     {"name": "domain", "label": "邮箱域名", "required": True, "placeholder": "example.com"},
                     {"name": "enable_prefix", "label": "启用前缀", "required": False, "default": True},
+                ]
+            },
+            {
+                "value": "generic_imap",
+                "label": "Generic IMAP",
+                "description": "自定义 alias + 任意 IMAP 收件箱轮询",
+                "config_fields": [
+                    {"name": "alias.domain", "label": "别名域名", "required": True},
+                    {"name": "alias.prefix_length", "label": "前缀长度", "required": False, "default": 10},
+                    {"name": "imap.host", "label": "IMAP Host", "required": True},
+                    {"name": "imap.port", "label": "IMAP Port", "required": True, "default": 993},
+                    {"name": "imap.use_ssl", "label": "SSL", "required": False, "default": True},
+                    {"name": "imap.mailbox", "label": "Mailbox", "required": False, "default": "INBOX"},
+                    {"name": "imap.username", "label": "用户名", "required": True},
+                    {"name": "imap.password", "label": "密码", "required": True, "secret": True},
                 ]
             }
         ]
@@ -304,11 +346,8 @@ async def update_email_service(service_id: int, request: EmailServiceUpdate):
         if request.name is not None:
             update_data["name"] = request.name
         if request.config is not None:
-            # 合并配置而不是替换
             current_config = service.config or {}
-            merged_config = {**current_config, **request.config}
-            # 移除空值
-            merged_config = {k: v for k, v in merged_config.items() if v}
+            merged_config = _merge_config(current_config, request.config)
             update_data["config"] = merged_config
         if request.enabled is not None:
             update_data["enabled"] = request.enabled

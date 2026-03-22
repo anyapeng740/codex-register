@@ -20,7 +20,7 @@ def upload_to_sub2api(
     accounts: List[Account],
     api_url: str,
     api_key: str,
-    concurrency: int = 3,
+    concurrency: int = 1,
     priority: int = 50,
 ) -> Tuple[bool, str]:
     """

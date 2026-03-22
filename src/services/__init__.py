@@ -14,12 +14,14 @@ from .tempmail import TempmailService
 from .outlook import OutlookService
 from .moe_mail import MeoMailEmailService
 from .temp_mail import TempMailService
+from .generic_imap import GenericImapEmailService
 
 # 注册服务
 EmailServiceFactory.register(EmailServiceType.TEMPMAIL, TempmailService)
 EmailServiceFactory.register(EmailServiceType.OUTLOOK, OutlookService)
 EmailServiceFactory.register(EmailServiceType.CUSTOM_DOMAIN, MeoMailEmailService)
 EmailServiceFactory.register(EmailServiceType.TEMP_MAIL, TempMailService)
+EmailServiceFactory.register(EmailServiceType.GENERIC_IMAP, GenericImapEmailService)
 
 # 导出 Outlook 模块的额外内容
 from .outlook.base import (
@@ -50,6 +52,7 @@ __all__ = [
     'OutlookService',
     'MeoMailEmailService',
     'TempMailService',
+    'GenericImapEmailService',
     # Outlook 模块
     'ProviderType',
     'EmailMessage',

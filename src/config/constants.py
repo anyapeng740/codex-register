@@ -35,6 +35,7 @@ class EmailServiceType(str, Enum):
     OUTLOOK = "outlook"
     CUSTOM_DOMAIN = "custom_domain"
     TEMP_MAIL = "temp_mail"
+    GENERIC_IMAP = "generic_imap"
 
 
 # ============================================================================
@@ -60,6 +61,8 @@ OAUTH_SCOPE = "openid email profile offline_access"
 OPENAI_API_ENDPOINTS = {
     "sentinel": "https://sentinel.openai.com/backend-api/sentinel/req",
     "signup": "https://auth.openai.com/api/accounts/authorize/continue",
+    "verify_password": "https://auth.openai.com/api/accounts/password/verify",
+    "passwordless_send_otp": "https://auth.openai.com/api/accounts/passwordless/send-otp",
     "register": "https://auth.openai.com/api/accounts/user/register",
     "send_otp": "https://auth.openai.com/api/accounts/email-otp/send",
     "validate_otp": "https://auth.openai.com/api/accounts/email-otp/validate",
@@ -112,6 +115,31 @@ EMAIL_SERVICE_DEFAULTS = {
         "api_key_header": "X-API-Key",
         "timeout": 30,
         "max_retries": 3,
+    },
+    "generic_imap": {
+        "alias": {
+            "domain": "",
+            "prefix_length": 10,
+        },
+        "imap": {
+            "host": "",
+            "port": 993,
+            "use_ssl": True,
+            "mailbox": "INBOX",
+            "username": "",
+            "password": "",
+        },
+        "wait": {
+            "timeout": 180,
+            "poll_interval": 5,
+            "unseen_only": False,
+        },
+        "match": {
+            "recipient": "",
+            "ignore_recipient": True,
+            "sender_contains": ["openai"],
+            "subject_contains": ["verification", "代码", "验证码", "chatgpt"],
+        },
     }
 }
 

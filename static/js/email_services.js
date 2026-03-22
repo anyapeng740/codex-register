@@ -4,7 +4,7 @@
 
 // 状态
 let outlookServices = [];
-let customServices = [];  // 合并 custom_domain + temp_mail
+let customServices = [];  // 合并 custom_domain + temp_mail + generic_imap
 let selectedOutlook = new Set();
 let selectedCustom = new Set();
 
@@ -50,6 +50,7 @@ const elements = {
     customSubType: document.getElementById('custom-sub-type'),
     addMoemailFields: document.getElementById('add-moemail-fields'),
     addTempmailFields: document.getElementById('add-tempmail-fields'),
+    addGenericImapFields: document.getElementById('add-generic-imap-fields'),
 
     // 编辑自定义域名模态框
     editCustomModal: document.getElementById('edit-custom-modal'),
@@ -58,6 +59,7 @@ const elements = {
     cancelEditCustom: document.getElementById('cancel-edit-custom'),
     editMoemailFields: document.getElementById('edit-moemail-fields'),
     editTempmailFields: document.getElementById('edit-tempmail-fields'),
+    editGenericImapFields: document.getElementById('edit-generic-imap-fields'),
     editCustomTypeBadge: document.getElementById('edit-custom-type-badge'),
     editCustomSubTypeHidden: document.getElementById('edit-custom-sub-type-hidden'),
 
@@ -164,25 +166,32 @@ function closeEmailMoreMenu(el) {
     if (menu) menu.classList.remove('active');
 }
 
+function parseCsvList(value) {
+    return (value || '')
+        .split(',')
+        .map(item => item.trim())
+        .filter(Boolean);
+}
+
 // 切换添加表单子类型
 function switchAddSubType(subType) {
     elements.customSubType.value = subType;
-    if (subType === 'moemail') {
-        elements.addMoemailFields.style.display = '';
-        elements.addTempmailFields.style.display = 'none';
-    } else {
-        elements.addMoemailFields.style.display = 'none';
-        elements.addTempmailFields.style.display = '';
-    }
+    elements.addMoemailFields.style.display = subType === 'moemail' ? '' : 'none';
+    elements.addTempmailFields.style.display = subType === 'tempmail' ? '' : 'none';
+    elements.addGenericImapFields.style.display = subType === 'generic_imap' ? '' : 'none';
 }
 
 // 切换编辑表单子类型显示
 function switchEditSubType(subType) {
     elements.editCustomSubTypeHidden.value = subType;
-    const isMoe = subType === 'moemail';
-    elements.editMoemailFields.style.display = isMoe ? '' : 'none';
-    elements.editTempmailFields.style.display = isMoe ? 'none' : '';
-    elements.editCustomTypeBadge.textContent = isMoe ? '🔗 MoeMail（自定义域名 API）' : '📮 TempMail（自部署 Cloudflare Worker）';
+    elements.editMoemailFields.style.display = subType === 'moemail' ? '' : 'none';
+    elements.editTempmailFields.style.display = subType === 'tempmail' ? '' : 'none';
+    elements.editGenericImapFields.style.display = subType === 'generic_imap' ? '' : 'none';
+    elements.editCustomTypeBadge.textContent = subType === 'moemail'
+        ? '🔗 MoeMail（自定义域名 API）'
+        : subType === 'tempmail'
+            ? '📮 TempMail（自部署 Cloudflare Worker）'
+            : '📬 Generic IMAP（自定义 IMAP）';
 }
 
 // 加载统计信息
@@ -190,7 +199,7 @@ async function loadStats() {
     try {
         const data = await api.get('/email-services/stats');
         elements.outlookCount.textContent = data.outlook_count || 0;
-        elements.customCount.textContent = (data.custom_count || 0) + (data.temp_mail_count || 0);
+        elements.customCount.textContent = (data.custom_count || 0) + (data.temp_mail_count || 0) + (data.generic_imap_count || 0);
         elements.tempmailStatus.textContent = data.tempmail_available ? '可用' : '不可用';
         elements.totalEnabled.textContent = data.enabled_count || 0;
     } catch (error) {
@@ -262,16 +271,18 @@ async function loadOutlookServices() {
     }
 }
 
-// 加载自定义域名服务（custom_domain + temp_mail 合并）
+// 加载自定义域名服务（custom_domain + temp_mail + generic_imap 合并）
 async function loadCustomServices() {
     try {
-        const [r1, r2] = await Promise.all([
+        const [r1, r2, r3] = await Promise.all([
             api.get('/email-services?service_type=custom_domain'),
-            api.get('/email-services?service_type=temp_mail')
+            api.get('/email-services?service_type=temp_mail'),
+            api.get('/email-services?service_type=generic_imap')
         ]);
         customServices = [
             ...(r1.services || []).map(s => ({ ...s, _subType: 'moemail' })),
-            ...(r2.services || []).map(s => ({ ...s, _subType: 'tempmail' }))
+            ...(r2.services || []).map(s => ({ ...s, _subType: 'tempmail' })),
+            ...(r3.services || []).map(s => ({ ...s, _subType: 'generic_imap' }))
         ];
 
         if (customServices.length === 0) {
@@ -290,9 +301,16 @@ async function loadCustomServices() {
         }
 
         elements.customTable.innerHTML = customServices.map(service => {
-            const isMoe = service._subType === 'moemail';
-            const typeLabel = isMoe ? '<span class="status-badge info">MoeMail</span>' : '<span class="status-badge warning">TempMail</span>';
-            const addr = isMoe ? (service.config?.base_url || '-') : (service.config?.base_url || '-');
+            const typeLabel = service._subType === 'moemail'
+                ? '<span class="status-badge info">MoeMail</span>'
+                : service._subType === 'tempmail'
+                    ? '<span class="status-badge warning">TempMail</span>'
+                    : '<span class="status-badge active">Generic IMAP</span>';
+            const addr = service._subType === 'moemail'
+                ? (service.config?.base_url || '-')
+                : service._subType === 'tempmail'
+                    ? (service.config?.base_url || '-')
+                    : `${service.config?.alias?.domain || '-'} / ${service.config?.imap?.host || '-'}`;
             return `
             <tr data-id="${service.id}">
                 <td><input type="checkbox" data-id="${service.id}" ${selectedCustom.has(service.id) ? 'checked' : ''}></td>
@@ -396,13 +414,41 @@ async function handleAddCustom(e) {
             api_key: formData.get('api_key'),
             default_domain: formData.get('domain')
         };
-    } else {
+    } else if (subType === 'tempmail') {
         serviceType = 'temp_mail';
         config = {
             base_url: formData.get('tm_base_url'),
             admin_password: formData.get('tm_admin_password'),
             domain: formData.get('tm_domain'),
             enable_prefix: true
+        };
+    } else {
+        serviceType = 'generic_imap';
+        config = {
+            alias: {
+                domain: formData.get('imap_alias_domain'),
+                prefix_length: parseInt(formData.get('imap_prefix_length')) || 10,
+            },
+            imap: {
+                host: formData.get('imap_host'),
+                port: parseInt(formData.get('imap_port')) || 993,
+                use_ssl: formData.get('imap_use_ssl') === 'on',
+                mailbox: (formData.get('imap_mailbox') || 'INBOX').split(',')[0].trim() || 'INBOX',
+                mailboxes: parseCsvList(formData.get('imap_mailbox')),
+                username: formData.get('imap_username'),
+                password: formData.get('imap_password'),
+            },
+            wait: {
+                timeout: parseInt(formData.get('imap_timeout')) || 180,
+                poll_interval: parseInt(formData.get('imap_poll_interval')) || 5,
+                unseen_only: formData.get('imap_unseen_only') === 'on',
+            },
+            match: {
+                recipient: formData.get('imap_recipient') || '',
+                ignore_recipient: formData.get('imap_ignore_recipient') === 'on',
+                sender_contains: parseCsvList(formData.get('imap_sender_contains')),
+                subject_contains: parseCsvList(formData.get('imap_subject_contains')),
+            }
         };
     }
 
@@ -419,6 +465,7 @@ async function handleAddCustom(e) {
         toast.success('服务添加成功');
         elements.addCustomModal.classList.remove('active');
         e.target.reset();
+        switchAddSubType('moemail');
         loadCustomServices();
         loadStats();
     } catch (error) {
@@ -535,11 +582,17 @@ function escapeHtml(text) {
 
 // ============== 编辑功能 ==============
 
-// 编辑自定义域名服务（支持 moemail / tempmail）
+// 编辑自定义域名服务（支持 moemail / tempmail / generic_imap）
 async function editCustomService(id, subType) {
     try {
         const service = await api.get(`/email-services/${id}/full`);
-        const resolvedSubType = subType || (service.service_type === 'temp_mail' ? 'tempmail' : 'moemail');
+        const resolvedSubType = subType || (
+            service.service_type === 'temp_mail'
+                ? 'tempmail'
+                : service.service_type === 'generic_imap'
+                    ? 'generic_imap'
+                    : 'moemail'
+        );
 
         document.getElementById('edit-custom-id').value = service.id;
         document.getElementById('edit-custom-name').value = service.name || '';
@@ -551,13 +604,32 @@ async function editCustomService(id, subType) {
         if (resolvedSubType === 'moemail') {
             document.getElementById('edit-custom-api-url').value = service.config?.base_url || '';
             document.getElementById('edit-custom-api-key').value = '';
-            document.getElementById('edit-custom-api-key').placeholder = service.config?.has_api_key ? '已设置，留空保持不变' : 'API Key';
+            document.getElementById('edit-custom-api-key').placeholder = service.config?.api_key ? '已设置，留空保持不变' : 'API Key';
             document.getElementById('edit-custom-domain').value = service.config?.default_domain || service.config?.domain || '';
-        } else {
+        } else if (resolvedSubType === 'tempmail') {
             document.getElementById('edit-tm-base-url').value = service.config?.base_url || '';
             document.getElementById('edit-tm-admin-password').value = '';
             document.getElementById('edit-tm-admin-password').placeholder = service.config?.admin_password ? '已设置，留空保持不变' : '请输入 Admin 密码';
             document.getElementById('edit-tm-domain').value = service.config?.domain || '';
+        } else {
+            document.getElementById('edit-imap-alias-domain').value = service.config?.alias?.domain || '';
+            document.getElementById('edit-imap-prefix-length').value = service.config?.alias?.prefix_length || 10;
+            document.getElementById('edit-imap-host').value = service.config?.imap?.host || '';
+            document.getElementById('edit-imap-port').value = service.config?.imap?.port || 993;
+            document.getElementById('edit-imap-mailbox').value = (service.config?.imap?.mailboxes || []).length
+                ? (service.config.imap.mailboxes || []).join(', ')
+                : (service.config?.imap?.mailbox || 'INBOX');
+            document.getElementById('edit-imap-use-ssl').checked = service.config?.imap?.use_ssl !== false;
+            document.getElementById('edit-imap-username').value = service.config?.imap?.username || '';
+            document.getElementById('edit-imap-password').value = '';
+            document.getElementById('edit-imap-password').placeholder = service.config?.imap?.password ? '已设置，留空保持不变' : '请输入 IMAP 密码';
+            document.getElementById('edit-imap-timeout').value = service.config?.wait?.timeout || 180;
+            document.getElementById('edit-imap-poll-interval').value = service.config?.wait?.poll_interval || 5;
+            document.getElementById('edit-imap-unseen-only').checked = !!service.config?.wait?.unseen_only;
+            document.getElementById('edit-imap-ignore-recipient').checked = service.config?.match?.ignore_recipient !== false;
+            document.getElementById('edit-imap-recipient').value = service.config?.match?.recipient || '';
+            document.getElementById('edit-imap-sender-contains').value = (service.config?.match?.sender_contains || []).join(', ');
+            document.getElementById('edit-imap-subject-contains').value = (service.config?.match?.subject_contains || []).join(', ');
         }
 
         elements.editCustomModal.classList.add('active');
@@ -573,6 +645,14 @@ async function handleEditCustom(e) {
     const formData = new FormData(e.target);
     const subType = formData.get('sub_type');
 
+    let currentService;
+    try {
+        currentService = await api.get(`/email-services/${id}/full`);
+    } catch (error) {
+        toast.error('获取服务信息失败');
+        return;
+    }
+
     let config;
     if (subType === 'moemail') {
         config = {
@@ -581,7 +661,7 @@ async function handleEditCustom(e) {
         };
         const apiKey = formData.get('api_key');
         if (apiKey && apiKey.trim()) config.api_key = apiKey.trim();
-    } else {
+    } else if (subType === 'tempmail') {
         config = {
             base_url: formData.get('tm_base_url'),
             domain: formData.get('tm_domain'),
@@ -589,6 +669,37 @@ async function handleEditCustom(e) {
         };
         const pwd = formData.get('tm_admin_password');
         if (pwd && pwd.trim()) config.admin_password = pwd.trim();
+    } else {
+        config = {
+            alias: {
+                domain: formData.get('imap_alias_domain'),
+                prefix_length: parseInt(formData.get('imap_prefix_length')) || 10,
+            },
+            imap: {
+                host: formData.get('imap_host'),
+                port: parseInt(formData.get('imap_port')) || 993,
+                use_ssl: formData.get('imap_use_ssl') === 'on',
+                mailbox: (formData.get('imap_mailbox') || 'INBOX').split(',')[0].trim() || 'INBOX',
+                mailboxes: parseCsvList(formData.get('imap_mailbox')),
+                username: formData.get('imap_username'),
+                password: currentService.config?.imap?.password || ''
+            },
+            wait: {
+                timeout: parseInt(formData.get('imap_timeout')) || 180,
+                poll_interval: parseInt(formData.get('imap_poll_interval')) || 5,
+                unseen_only: formData.get('imap_unseen_only') === 'on',
+            },
+            match: {
+                recipient: formData.get('imap_recipient') || '',
+                ignore_recipient: formData.get('imap_ignore_recipient') === 'on',
+                sender_contains: parseCsvList(formData.get('imap_sender_contains')),
+                subject_contains: parseCsvList(formData.get('imap_subject_contains')),
+            }
+        };
+        const imapPassword = formData.get('imap_password');
+        if (imapPassword && imapPassword.trim()) {
+            config.imap.password = imapPassword.trim();
+        }
     }
 
     const updateData = {

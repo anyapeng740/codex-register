@@ -209,6 +209,7 @@
                         <select id="custom-sub-type" name="sub_type">
                             <option value="moemail">MoeMail（自定义域名 API）</option>
                             <option value="tempmail">TempMail（自部署 Cloudflare Worker）</option>
+                            <option value="generic_imap">Generic IMAP（自定义 IMAP）</option>
                         </select>
                     </div>
                     <!-- MoeMail 字段 -->
@@ -239,6 +240,88 @@
                         <div class="form-group">
                             <label for="custom-tm-domain">邮箱域名</label>
                             <input type="text" id="custom-tm-domain" name="tm_domain" placeholder="example.com">
+                        </div>
+                    </div>
+                    <!-- Generic IMAP 字段 -->
+                    <div id="add-generic-imap-fields" style="display:none;">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="custom-imap-alias-domain">别名域名</label>
+                                <input type="text" id="custom-imap-alias-domain" name="imap_alias_domain" placeholder="ai-coding-studio.com">
+                            </div>
+                            <div class="form-group">
+                                <label for="custom-imap-prefix-length">前缀长度</label>
+                                <input type="number" id="custom-imap-prefix-length" name="imap_prefix_length" value="10" min="1" max="64">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="custom-imap-host">IMAP Host</label>
+                                <input type="text" id="custom-imap-host" name="imap_host" placeholder="mail.example.com">
+                            </div>
+                            <div class="form-group">
+                                <label for="custom-imap-port">IMAP Port</label>
+                                <input type="number" id="custom-imap-port" name="imap_port" value="993" min="1">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="custom-imap-mailbox">Mailbox（支持逗号分隔多个）</label>
+                                <input type="text" id="custom-imap-mailbox" name="imap_mailbox" value="INBOX, Junk, Spam" placeholder="INBOX, Junk, Spam">
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="custom-imap-use-ssl" name="imap_use_ssl" checked>
+                                    使用 SSL
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="custom-imap-username">IMAP 用户名</label>
+                            <input type="text" id="custom-imap-username" name="imap_username" placeholder="admin@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="custom-imap-password">IMAP 密码</label>
+                            <input type="password" id="custom-imap-password" name="imap_password" placeholder="IMAP 密码">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="custom-imap-timeout">超时时间</label>
+                                <input type="number" id="custom-imap-timeout" name="imap_timeout" value="180" min="1">
+                            </div>
+                            <div class="form-group">
+                                <label for="custom-imap-poll-interval">轮询间隔</label>
+                                <input type="number" id="custom-imap-poll-interval" name="imap_poll_interval" value="5" min="1">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="custom-imap-unseen-only" name="imap_unseen_only">
+                                    仅未读邮件
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="custom-imap-ignore-recipient" name="imap_ignore_recipient" checked>
+                                    忽略收件人匹配
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="custom-imap-recipient">匹配收件人（可选）</label>
+                            <input type="text" id="custom-imap-recipient" name="imap_recipient" placeholder="replace-me@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="custom-imap-sender-contains">发件人包含（逗号分隔）</label>
+                            <input type="text" id="custom-imap-sender-contains" name="imap_sender_contains" value="openai" placeholder="openai, noreply@openai.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="custom-imap-subject-contains">主题包含（逗号分隔）</label>
+                            <input type="text" id="custom-imap-subject-contains" name="imap_subject_contains" value="verification,代码,验证码,chatgpt" placeholder="verification, 验证码">
+                        </div>
+                        <div class="form-group">
+                            <small style="color: var(--text-muted);">注意：该 IMAP 收件箱必须能接收到 alias 域名下的邮件（catch-all / 别名映射 / 自动转发）。</small>
                         </div>
                     </div>
                     <div class="form-row">
@@ -312,6 +395,86 @@
                         <div class="form-group">
                             <label for="edit-tm-domain">邮箱域名</label>
                             <input type="text" id="edit-tm-domain" name="tm_domain" placeholder="example.com">
+                        </div>
+                    </div>
+                    <!-- Generic IMAP 字段 -->
+                    <div id="edit-generic-imap-fields" style="display:none;">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="edit-imap-alias-domain">别名域名</label>
+                                <input type="text" id="edit-imap-alias-domain" name="imap_alias_domain" placeholder="ai-coding-studio.com">
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-imap-prefix-length">前缀长度</label>
+                                <input type="number" id="edit-imap-prefix-length" name="imap_prefix_length" value="10" min="1" max="64">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="edit-imap-host">IMAP Host</label>
+                                <input type="text" id="edit-imap-host" name="imap_host" placeholder="mail.example.com">
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-imap-port">IMAP Port</label>
+                                <input type="number" id="edit-imap-port" name="imap_port" value="993" min="1">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="edit-imap-mailbox">Mailbox（支持逗号分隔多个）</label>
+                                <input type="text" id="edit-imap-mailbox" name="imap_mailbox" placeholder="INBOX, Junk, Spam">
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="edit-imap-use-ssl" name="imap_use_ssl">
+                                    使用 SSL
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-imap-username">IMAP 用户名</label>
+                            <input type="text" id="edit-imap-username" name="imap_username" placeholder="admin@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-imap-password">IMAP 密码</label>
+                            <input type="password" id="edit-imap-password" name="imap_password" placeholder="留空则不修改">
+                            <small style="color: var(--text-muted);">留空则保持原值不变</small>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="edit-imap-timeout">超时时间</label>
+                                <input type="number" id="edit-imap-timeout" name="imap_timeout" value="180" min="1">
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-imap-poll-interval">轮询间隔</label>
+                                <input type="number" id="edit-imap-poll-interval" name="imap_poll_interval" value="5" min="1">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="edit-imap-unseen-only" name="imap_unseen_only">
+                                    仅未读邮件
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="edit-imap-ignore-recipient" name="imap_ignore_recipient">
+                                    忽略收件人匹配
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-imap-recipient">匹配收件人（可选）</label>
+                            <input type="text" id="edit-imap-recipient" name="imap_recipient" placeholder="replace-me@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-imap-sender-contains">发件人包含（逗号分隔）</label>
+                            <input type="text" id="edit-imap-sender-contains" name="imap_sender_contains" placeholder="openai, noreply@openai.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-imap-subject-contains">主题包含（逗号分隔）</label>
+                            <input type="text" id="edit-imap-subject-contains" name="imap_subject_contains" placeholder="verification, 验证码">
                         </div>
                     </div>
                     <div class="form-row">

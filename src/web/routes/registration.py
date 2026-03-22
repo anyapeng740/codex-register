@@ -211,6 +211,14 @@ def _normalize_email_service_config(
     elif service_type == EmailServiceType.TEMP_MAIL:
         if 'default_domain' in normalized and 'domain' not in normalized:
             normalized['domain'] = normalized.pop('default_domain')
+    elif service_type == EmailServiceType.GENERIC_IMAP:
+        alias_cfg = normalized.get('alias') or {}
+        if 'domain' in normalized and 'domain' not in alias_cfg:
+            alias_cfg['domain'] = normalized.pop('domain')
+        if 'prefix_length' in normalized and 'prefix_length' not in alias_cfg:
+            alias_cfg['prefix_length'] = normalized.pop('prefix_length')
+        if alias_cfg:
+            normalized['alias'] = alias_cfg
 
     if proxy_url and 'proxy_url' not in normalized:
         normalized['proxy_url'] = proxy_url
@@ -288,26 +296,26 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                         "max_retries": settings.tempmail_max_retries,
                         "proxy_url": actual_proxy_url,
                     }
-                elif service_type == EmailServiceType.CUSTOM_DOMAIN:
-                    # 检查数据库中是否有可用的自定义域名服务
+                elif service_type in (EmailServiceType.CUSTOM_DOMAIN, EmailServiceType.TEMP_MAIL, EmailServiceType.GENERIC_IMAP):
                     from ...database.models import EmailService as EmailServiceModel
+                    service_type_value = service_type.value
                     db_service = db.query(EmailServiceModel).filter(
-                        EmailServiceModel.service_type == "custom_domain",
+                        EmailServiceModel.service_type == service_type_value,
                         EmailServiceModel.enabled == True
                     ).order_by(EmailServiceModel.priority.asc()).first()
 
                     if db_service and db_service.config:
                         config = _normalize_email_service_config(service_type, db_service.config, actual_proxy_url)
                         crud.update_registration_task(db, task_uuid, email_service_id=db_service.id)
-                        logger.info(f"使用数据库自定义域名服务: {db_service.name}")
-                    elif settings.custom_domain_base_url and settings.custom_domain_api_key:
+                        logger.info(f"使用数据库邮箱服务: {db_service.name} ({service_type_value})")
+                    elif service_type == EmailServiceType.CUSTOM_DOMAIN and settings.custom_domain_base_url and settings.custom_domain_api_key:
                         config = {
                             "base_url": settings.custom_domain_base_url,
                             "api_key": settings.custom_domain_api_key.get_secret_value() if settings.custom_domain_api_key else "",
                             "proxy_url": actual_proxy_url,
                         }
                     else:
-                        raise ValueError("没有可用的自定义域名邮箱服务，请先在设置中配置")
+                        raise ValueError(f"没有可用的 {service_type_value} 邮箱服务，请先在邮箱服务页面配置")
                 elif service_type == EmailServiceType.OUTLOOK:
                     # 检查数据库中是否有可用的 Outlook 账户
                     from ...database.models import EmailService as EmailServiceModel, Account
@@ -765,7 +773,7 @@ async def start_registration(
     """
     启动注册任务
 
-    - email_service_type: 邮箱服务类型 (tempmail, outlook, custom_domain)
+    - email_service_type: 邮箱服务类型 (tempmail, outlook, custom_domain, temp_mail, generic_imap)
     - proxy: 代理地址
     - email_service_config: 邮箱服务配置（outlook 需要提供账户信息）
     """
@@ -817,15 +825,15 @@ async def start_batch_registration(
     """
     启动批量注册任务
 
-    - count: 注册数量 (1-100)
+    - count: 注册数量 (1-5000)
     - email_service_type: 邮箱服务类型
     - proxy: 代理地址
     - interval_min: 最小间隔秒数
     - interval_max: 最大间隔秒数
     """
     # 验证参数
-    if request.count < 1 or request.count > 100:
-        raise HTTPException(status_code=400, detail="注册数量必须在 1-100 之间")
+    if request.count < 1 or request.count > 5000:
+        raise HTTPException(status_code=400, detail="注册数量必须在 1-5000 之间")
 
     try:
         EmailServiceType(request.email_service_type)
@@ -1069,6 +1077,11 @@ async def get_available_email_services():
             "available": False,
             "count": 0,
             "services": []
+        },
+        "generic_imap": {
+            "available": False,
+            "count": 0,
+            "services": []
         }
     }
 
@@ -1141,6 +1154,28 @@ async def get_available_email_services():
 
         result["temp_mail"]["count"] = len(temp_mail_services)
         result["temp_mail"]["available"] = len(temp_mail_services) > 0
+
+        # 获取 Generic IMAP 服务
+        generic_imap_services = db.query(EmailServiceModel).filter(
+            EmailServiceModel.service_type == "generic_imap",
+            EmailServiceModel.enabled == True
+        ).order_by(EmailServiceModel.priority.asc()).all()
+
+        for service in generic_imap_services:
+            config = service.config or {}
+            alias_cfg = config.get("alias") or {}
+            imap_cfg = config.get("imap") or {}
+            result["generic_imap"]["services"].append({
+                "id": service.id,
+                "name": service.name,
+                "type": "generic_imap",
+                "domain": alias_cfg.get("domain"),
+                "imap_host": imap_cfg.get("host"),
+                "priority": service.priority
+            })
+
+        result["generic_imap"]["count"] = len(generic_imap_services)
+        result["generic_imap"]["available"] = len(generic_imap_services) > 0
 
     return result
 
