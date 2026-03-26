@@ -155,6 +155,7 @@ class RegistrationEngine:
         self._otp_sent_at: Optional[float] = None  # OTP 发送时间戳
         self._is_existing_account: bool = False  # 是否为已注册账号（用于自动登录）
         self._post_create_account_start_urls: List[str] = []  # create_account 后可尝试的跳转起点
+        self._last_create_account_error: Dict[str, Any] = {}  # 记录 create_account 的失败细节
 
     def _log(self, message: str, level: str = "info"):
         """记录日志"""
@@ -675,6 +676,7 @@ class RegistrationEngine:
     def _create_user_account(self) -> bool:
         """创建用户账户"""
         try:
+            self._last_create_account_error = {}
             user_info = generate_random_user_info()
             self._log(f"生成用户信息: {user_info['name']}, 生日: {user_info['birthdate']}")
             create_account_body = json.dumps(user_info)
@@ -692,6 +694,26 @@ class RegistrationEngine:
             self._log(f"账户创建状态: {response.status_code}")
 
             if response.status_code != 200:
+                error_code = ""
+                error_message = ""
+                error_type = ""
+                try:
+                    error_json = response.json()
+                    error = error_json.get("error") or {}
+                    if isinstance(error, dict):
+                        error_code = str(error.get("code") or "").strip()
+                        error_message = str(error.get("message") or "").strip()
+                        error_type = str(error.get("type") or "").strip()
+                except Exception:
+                    pass
+
+                self._last_create_account_error = {
+                    "status_code": response.status_code,
+                    "error_code": error_code,
+                    "error_message": error_message,
+                    "error_type": error_type,
+                    "response_text": response.text[:500],
+                }
                 self._log(f"账户创建失败: {response.text[:200]}", "warning")
                 return False
 
@@ -1331,7 +1353,15 @@ class RegistrationEngine:
             else:
                 self._log("12. 创建用户账户...")
                 if not self._create_user_account():
-                    result.error_message = "创建用户账户失败"
+                    create_account_error = self._last_create_account_error or {}
+                    error_code = str(create_account_error.get("error_code") or "").strip()
+                    result.metadata = {
+                        "step": "create_user_account",
+                        "create_account_error": create_account_error,
+                    }
+                    result.error_message = (
+                        f"创建用户账户失败 ({error_code})" if error_code else "创建用户账户失败"
+                    )
                     return result
 
             callback_url: Optional[str] = None

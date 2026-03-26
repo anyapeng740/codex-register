@@ -34,6 +34,8 @@ class TempmailService(BaseEmailService):
                 - timeout: 请求超时时间 (默认: 30)
                 - max_retries: 最大重试次数 (默认: 3)
                 - proxy_url: 代理 URL
+                - blocked_domain_roots: 禁止使用的根域名列表，默认跳过历史成功率明显偏低的域
+                - max_create_attempts: 过滤域名时，创建邮箱的最大尝试次数
             name: 服务名称
         """
         super().__init__(EmailServiceType.TEMPMAIL, name)
@@ -44,9 +46,22 @@ class TempmailService(BaseEmailService):
             "timeout": 30,
             "max_retries": 3,
             "proxy_url": None,
+            "blocked_domain_roots": ["cloudvxz.com"],
+            "max_create_attempts": 5,
         }
 
         self.config = {**default_config, **(config or {})}
+        blocked_roots = self.config.get("blocked_domain_roots") or []
+        if isinstance(blocked_roots, str):
+            blocked_roots = [item.strip().lower() for item in blocked_roots.split(",") if item.strip()]
+        else:
+            blocked_roots = [str(item).strip().lower() for item in blocked_roots if str(item).strip()]
+        self.config["blocked_domain_roots"] = blocked_roots
+
+        try:
+            self.config["max_create_attempts"] = max(1, int(self.config.get("max_create_attempts", 5)))
+        except (TypeError, ValueError):
+            self.config["max_create_attempts"] = 5
 
         # 创建 HTTP 客户端
         http_config = RequestConfig(
@@ -61,6 +76,15 @@ class TempmailService(BaseEmailService):
         # 状态变量
         self._email_cache: Dict[str, Dict[str, Any]] = {}
         self._last_check_time: float = 0
+
+    @staticmethod
+    def _get_root_domain(email: str) -> str:
+        """提取邮箱根域名，用于筛选历史上质量较差的临时邮箱域。"""
+        domain = str(email or "").strip().lower().split("@")[-1]
+        parts = [part for part in domain.split(".") if part]
+        if len(parts) >= 2:
+            return ".".join(parts[-2:])
+        return domain
 
     def create_email(self, config: Dict[str, Any] = None) -> Dict[str, Any]:
         """
@@ -77,40 +101,60 @@ class TempmailService(BaseEmailService):
             - created_at: 创建时间戳
         """
         try:
-            # 发送创建请求
-            response = self.http_client.post(
-                f"{self.config['base_url']}/inbox/create",
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                },
-                json={}
-            )
+            blocked_roots = set(self.config.get("blocked_domain_roots") or [])
+            max_create_attempts = self.config.get("max_create_attempts", 5)
 
-            if response.status_code not in (200, 201):
-                self.update_status(False, EmailServiceError(f"请求失败，状态码: {response.status_code}"))
-                raise EmailServiceError(f"Tempmail.lol 请求失败，状态码: {response.status_code}")
+            for attempt in range(1, max_create_attempts + 1):
+                # 发送创建请求
+                response = self.http_client.post(
+                    f"{self.config['base_url']}/inbox/create",
+                    headers={
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                    },
+                    json={}
+                )
 
-            data = response.json()
-            email = str(data.get("address", "")).strip()
-            token = str(data.get("token", "")).strip()
+                if response.status_code not in (200, 201):
+                    self.update_status(False, EmailServiceError(f"请求失败，状态码: {response.status_code}"))
+                    raise EmailServiceError(f"Tempmail.lol 请求失败，状态码: {response.status_code}")
 
-            if not email or not token:
-                self.update_status(False, EmailServiceError("返回数据不完整"))
-                raise EmailServiceError("Tempmail.lol 返回数据不完整")
+                data = response.json()
+                email = str(data.get("address", "")).strip()
+                token = str(data.get("token", "")).strip()
 
-            # 缓存邮箱信息
-            email_info = {
-                "email": email,
-                "service_id": token,
-                "token": token,
-                "created_at": time.time(),
-            }
-            self._email_cache[email] = email_info
+                if not email or not token:
+                    self.update_status(False, EmailServiceError("返回数据不完整"))
+                    raise EmailServiceError("Tempmail.lol 返回数据不完整")
 
-            logger.info(f"成功创建 Tempmail.lol 邮箱: {email}")
-            self.update_status(True)
-            return email_info
+                root_domain = self._get_root_domain(email)
+                if blocked_roots and root_domain in blocked_roots:
+                    logger.warning(
+                        "Tempmail.lol 返回低质量域名 %s，第 %d/%d 次，已跳过",
+                        root_domain,
+                        attempt,
+                        max_create_attempts,
+                    )
+                    if attempt < max_create_attempts:
+                        continue
+
+                    self.update_status(False, EmailServiceError(f"连续命中已屏蔽域名: {root_domain}"))
+                    raise EmailServiceError(f"Tempmail.lol 连续返回已屏蔽域名: {root_domain}")
+
+                # 缓存邮箱信息
+                email_info = {
+                    "email": email,
+                    "service_id": token,
+                    "token": token,
+                    "created_at": time.time(),
+                }
+                self._email_cache[email] = email_info
+
+                logger.info(f"成功创建 Tempmail.lol 邮箱: {email}")
+                self.update_status(True)
+                return email_info
+
+            raise EmailServiceError("Tempmail.lol 创建邮箱失败: 域名筛选未命中可用邮箱")
 
         except Exception as e:
             self.update_status(False, e)

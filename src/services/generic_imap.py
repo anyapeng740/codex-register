@@ -215,28 +215,50 @@ class GenericImapEmailService(BaseEmailService):
         )
 
     def _matches_filters(self, email_msg: EmailMessage, target_email: str, min_timestamp: int) -> bool:
+        return self._match_failure_reason(email_msg, target_email, min_timestamp) is None
+
+    def _match_failure_reason(
+        self,
+        email_msg: EmailMessage,
+        target_email: str,
+        min_timestamp: int
+    ) -> Optional[str]:
         if min_timestamp > 0 and email_msg.received_timestamp > 0 and email_msg.received_timestamp < min_timestamp:
-            return False
+            return f"received_before_otp:{email_msg.received_timestamp}<{min_timestamp}"
 
         sender_patterns = [str(x).lower() for x in (self.match_config.get("sender_contains") or []) if str(x).strip()]
         if sender_patterns:
             sender = email_msg.sender.lower()
             if not any(pattern in sender for pattern in sender_patterns):
-                return False
+                return f"sender_mismatch:{email_msg.sender[:80]}"
 
         subject_patterns = [str(x).lower() for x in (self.match_config.get("subject_contains") or []) if str(x).strip()]
         if subject_patterns:
             subject = email_msg.subject.lower()
             if not any(pattern in subject for pattern in subject_patterns):
-                return False
+                return f"subject_mismatch:{email_msg.subject[:80]}"
 
         if not self.match_config.get("ignore_recipient", True):
             expected = (self.match_config.get("recipient") or target_email or "").lower().strip()
             recipients = " ".join(email_msg.recipients).lower()
             if expected and expected not in recipients:
-                return False
+                return f"recipient_mismatch:{' '.join(email_msg.recipients)[:120]}"
 
-        return True
+        return None
+
+    def _format_debug_email_summary(
+        self,
+        mailbox: str,
+        email_msg: EmailMessage,
+        reason: str
+    ) -> str:
+        received = email_msg.received_at.isoformat() if email_msg.received_at else str(email_msg.received_timestamp or "")
+        recipients = ", ".join(email_msg.recipients[:3]) if email_msg.recipients else "-"
+        return (
+            f"mailbox={mailbox} id={email_msg.id} reason={reason} "
+            f"sender={email_msg.sender[:80]} subject={email_msg.subject[:100]} "
+            f"to={recipients[:120]} received={received}"
+        )
 
     def get_verification_code(
         self,
@@ -254,11 +276,14 @@ class GenericImapEmailService(BaseEmailService):
         min_timestamp = int(otp_sent_at) if otp_sent_at else 0
         start_time = time.time()
         seen_ids = set()
+        recent_debug_items: List[str] = []
+        last_mailbox_stats: List[str] = []
 
         logger.info(f"[{email}] Generic IMAP 开始轮询 mailboxes={mailboxes}, timeout={actual_timeout}s")
 
         while time.time() - start_time < actual_timeout:
             conn = None
+            current_mailbox_stats: List[str] = []
             try:
                 conn = self._connect()
                 for mailbox in mailboxes:
@@ -266,11 +291,14 @@ class GenericImapEmailService(BaseEmailService):
                         status, _ = conn.select(mailbox, readonly=True)
                         if status != "OK":
                             logger.debug(f"[{email}] 选择邮箱夹失败: {mailbox}")
+                            current_mailbox_stats.append(f"{mailbox}:select={status}")
                             continue
                         status, data = conn.search(None, "UNSEEN" if unseen_only else "ALL")
                         if status != "OK" or not data or not data[0]:
+                            current_mailbox_stats.append(f"{mailbox}:search={status},count=0")
                             continue
                         ids = data[0].split()
+                        current_mailbox_stats.append(f"{mailbox}:search={status},count={len(ids)}")
                         for message_id in ids[-20:][::-1]:
                             decoded_id = f"{mailbox}:{message_id.decode(errors='ignore')}"
                             if decoded_id in seen_ids:
@@ -287,8 +315,14 @@ class GenericImapEmailService(BaseEmailService):
                             email_msg = self._parse_message(message_id, raw)
                             if not email_msg:
                                 continue
-                            if not self._matches_filters(email_msg, email, min_timestamp):
-                                logger.debug(f"[{email}] 跳过邮件 mailbox={mailbox} subject={email_msg.subject[:80]}")
+                            failure_reason = self._match_failure_reason(email_msg, email, min_timestamp)
+                            if failure_reason:
+                                logger.debug(f"[{email}] 跳过邮件 mailbox={mailbox} reason={failure_reason} subject={email_msg.subject[:80]}")
+                                recent_debug_items.append(
+                                    self._format_debug_email_summary(mailbox, email_msg, failure_reason)
+                                )
+                                if len(recent_debug_items) > 12:
+                                    recent_debug_items = recent_debug_items[-12:]
                                 continue
                             code = self.email_parser.extract_verification_code(email_msg)
                             if code:
@@ -302,8 +336,15 @@ class GenericImapEmailService(BaseEmailService):
                                 self.update_status(True)
                                 logger.info(f"从 Generic IMAP 邮箱 {email} 兜底提取验证码: {code} (mailbox={mailbox})")
                                 return code
+                            recent_debug_items.append(
+                                self._format_debug_email_summary(mailbox, email_msg, "no_otp_code_found")
+                            )
+                            if len(recent_debug_items) > 12:
+                                recent_debug_items = recent_debug_items[-12:]
                     except Exception as mailbox_error:
                         logger.debug(f"[{email}] 检查邮箱夹 {mailbox} 时出错: {mailbox_error}")
+                        current_mailbox_stats.append(f"{mailbox}:error={mailbox_error}")
+                last_mailbox_stats = current_mailbox_stats
             except Exception as e:
                 logger.debug(f"检查 Generic IMAP 邮件时出错: {e}")
                 self.update_status(False, e)
@@ -320,6 +361,12 @@ class GenericImapEmailService(BaseEmailService):
             time.sleep(poll_interval)
 
         logger.warning(f"等待 Generic IMAP 验证码超时: {email}, mailboxes={mailboxes}")
+        if last_mailbox_stats:
+            logger.warning(f"[{email}] 最近一次邮箱夹扫描统计: {' | '.join(last_mailbox_stats)}")
+        if recent_debug_items:
+            logger.warning(f"[{email}] 最近检查过的候选邮件({len(recent_debug_items)}):")
+            for item in recent_debug_items:
+                logger.warning(f"[{email}] {item}")
         return None
 
     def list_emails(self, **kwargs) -> List[Dict[str, Any]]:
